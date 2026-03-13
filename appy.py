@@ -1,18 +1,22 @@
-
+# app.py
 import json
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 from datasets import load_dataset
 
 st.set_page_config(page_title="SQuAD v2 Answerability Dashboard", layout="wide")
 
+# -------------------------
 # Sidebar controls
+# -------------------------
 st.sidebar.title("Settings")
 debug = st.sidebar.checkbox("Debug mode (show diagnostics)", value=False)
 st.sidebar.markdown("When **Debug mode** is on the app will show raw dataset diagnostics.")
-st.sidebar.markdown("Toggle caching for faster loads in production below.")
+st.sidebar.markdown("Toggle caching and manual load to reduce startup lag.")
 use_cache = st.sidebar.checkbox("Use cache for dataset load", value=True)
+manual_load = st.sidebar.checkbox("Manual dataset load (click button to load)", value=False)
 
 # -------------------------
 # Utility functions
@@ -44,59 +48,45 @@ def raw_is_answerable(example):
         return any(bool(str(x).strip()) for x in a)
     return False
 
-def normalize_answers(cell):
-    """Normalize various possible representations of `answers` into a list of text strings."""
-    if cell is None:
-        return []
-    if isinstance(cell, dict) and "text" in cell:
-        texts = cell["text"]
-        if isinstance(texts, (list, tuple)):
-            return [str(x) for x in texts if x is not None and str(x).strip() != ""]
-        return [str(texts)] if texts is not None and str(texts).strip() != "" else []
-    if isinstance(cell, (list, tuple)):
-        out = []
-        for item in cell:
-            if isinstance(item, dict) and "text" in item:
-                t = item["text"]
-                if isinstance(t, (list, tuple)):
-                    out.extend([str(x) for x in t if x is not None and str(x).strip() != ""])
-                else:
-                    if t is not None and str(t).strip() != "":
-                        out.append(str(t))
-            else:
-                if item is not None and str(item).strip() != "":
-                    out.append(str(item))
-        return out
-    if isinstance(cell, str):
-        s = cell.strip()
-        if s == "" or s == "[]":
-            return []
-        if (s.startswith("{") or s.startswith("[")):
-            try:
-                parsed = json.loads(s)
-                return normalize_answers(parsed)
-            except Exception:
-                return [s]
-        return [s]
-    return [str(cell)]
+def safe_load_dataset(name):
+    """
+    Load dataset with a spinner and catch exceptions so the app doesn't crash on startup.
+    Returns a dict-like object with 'train' and 'validation' keys even on failure.
+    """
+    try:
+        with st.spinner(f"Loading dataset {name} (may take a minute)..."):
+            ds = load_dataset(name)
+        return ds
+    except Exception as e:
+        st.error(f"Dataset load failed: {e}")
+        # return minimal empty structure so app can continue
+        return {"train": [], "validation": []}
 
 # -------------------------
 # Core loader (raw-based, mirrors Colab)
 # -------------------------
-def load_and_prepare_raw(debug=False):
+def load_and_prepare_raw(ds, debug=False):
     """
-    Load SQuAD v2 from Hugging Face, compute is_answerable from raw examples,
+    Build DataFrame from raw HF examples (compute is_answerable from raw examples),
     and return combined DataFrame and summary DataFrame.
     """
-    ds = load_dataset("squad_v2")
+    # If ds is empty structure, return empty frames
+    if not ds or ("train" not in ds and "validation" not in ds):
+        empty_df = pd.DataFrame(columns=["id", "title", "context", "question", "answers", "is_answerable"])
+        summary = pd.DataFrame(columns=["is_answerable", "count", "label"])
+        return empty_df, summary
 
     if debug:
-        st.write("datasets version:", __import__("datasets").__version__)
+        try:
+            st.write("datasets version:", __import__("datasets").__version__)
+        except Exception:
+            pass
         st.write("pandas version:", pd.__version__)
         st.write("train length:", len(ds["train"]))
         st.write("validation length:", len(ds["validation"]))
-        st.write("Raw sample ds['train'][0]:")
-        st.json(ds["train"][0])
+        if len(ds["train"]) > 0:
+            st.write("Raw sample ds['train'][0]:")
+            st.json(ds["train"][0])
 
     # Build rows from raw examples (compute is_answerable using raw_is_answerable)
     def examples_to_rows(split):
@@ -116,7 +106,7 @@ def load_and_prepare_raw(debug=False):
     train_rows = examples_to_rows(ds["train"])
     valid_rows = examples_to_rows(ds["validation"])
 
-    # Create DataFrames (fast and predictable)
+    # Create DataFrames
     train_df = pd.DataFrame(train_rows)
     valid_df = pd.DataFrame(valid_rows)
 
@@ -124,35 +114,52 @@ def load_and_prepare_raw(debug=False):
     combined = pd.concat([train_df, valid_df], ignore_index=True)
 
     # Summary
-    summary = combined["is_answerable"].value_counts().rename_axis("is_answerable").reset_index(name="count")
-    summary["label"] = summary["is_answerable"].map({True: "answerable", False: "unanswerable"})
+    if "is_answerable" in combined.columns and not combined["is_answerable"].empty:
+        summary = combined["is_answerable"].value_counts().rename_axis("is_answerable").reset_index(name="count")
+        summary["label"] = summary["is_answerable"].map({True: "answerable", False: "unanswerable"})
+    else:
+        summary = pd.DataFrame(columns=["is_answerable", "count", "label"])
 
     if debug:
         st.write("Converted combined shape:", combined.shape)
         st.write("Converted sample row (head):", combined.head(3).to_dict(orient="records"))
         st.write("Raw HF answerable (train):", sum(1 for ex in ds["train"] if raw_is_answerable(ex)), "/", len(ds["train"]))
         st.write("Raw HF answerable (validation):", sum(1 for ex in ds["validation"] if raw_is_answerable(ex)), "/", len(ds["validation"]))
-        st.write("Combined answerable count:", int(combined["is_answerable"].sum()), "/", combined.shape[0])
+        st.write("Combined answerable count:", int(combined["is_answerable"].sum()) if "is_answerable" in combined.columns else 0, "/", combined.shape[0])
 
     return combined, summary
 
+# -------------------------
 # Cached wrapper for production loads
+# -------------------------
 if use_cache:
     @st.cache_data
-    def cached_load():
-        return load_and_prepare_raw(debug=False)
+    def cached_load_and_prepare(name="squad_v2"):
+        ds = safe_load_dataset(name)
+        return load_and_prepare_raw(ds, debug=False)
 else:
-    def cached_load():
-        return load_and_prepare_raw(debug=False)
-
-# Load data (debug uses direct call to show diagnostics)
-if debug:
-    data, summary = load_and_prepare_raw(debug=True)
-else:
-    data, summary = cached_load()
+    def cached_load_and_prepare(name="squad_v2"):
+        ds = safe_load_dataset(name)
+        return load_and_prepare_raw(ds, debug=False)
 
 # -------------------------
-# Robust plotting and UI
+# Load data (manual or automatic)
+# -------------------------
+data = pd.DataFrame()
+summary = pd.DataFrame()
+
+if manual_load:
+    if st.sidebar.button("Load dataset now"):
+        ds = safe_load_dataset("squad_v2")
+        data, summary = load_and_prepare_raw(ds, debug=debug)
+    else:
+        st.sidebar.info("Click 'Load dataset now' to download SQuAD v2.")
+else:
+    # automatic load (cached or not)
+    data, summary = cached_load_and_prepare("squad_v2")
+
+# -------------------------
+# UI and robust plotting
 # -------------------------
 st.title("SQuAD v2 Answerability Dashboard")
 st.markdown("Proportion of answerable vs unanswerable examples (computed from raw HF examples).")
@@ -175,47 +182,39 @@ else:
         summary_plot = summary.copy()
         summary_plot["count"] = pd.to_numeric(summary_plot["count"], errors="coerce").fillna(0).astype(int)
         summary_plot = summary_plot[summary_plot["count"] > 0]
-        if summary_plot.empty:
-            st.warning("No nonzero counts to plot. Showing table instead.")
-            st.table(summary_plot)
-        else:
-                # Robust pie chart (replace existing pie code with this)
-import plotly.graph_objects as go
 
-if summary is None or summary.empty:
-    st.warning("Summary is empty — cannot draw pie chart.")
-else:
-    if not {"label", "count"}.issubset(set(summary.columns)):
-        st.warning("Summary missing required columns 'label' and 'count'. Showing table instead.")
-        st.table(summary)
-    else:
-        summary_plot = summary.copy()
-        summary_plot["count"] = pd.to_numeric(summary_plot["count"], errors="coerce").fillna(0).astype(int)
         # DEBUG lines — remove after confirming
-        st.write("DEBUG summary_plot:", summary_plot)
+        if debug:
+            st.write("DEBUG summary_plot:", summary_plot)
+
         labels = summary_plot["label"].astype(str).tolist()
         values = summary_plot["count"].astype(int).tolist()
-        st.write("DEBUG labels:", labels)
-        st.write("DEBUG values:", values)
-        st.write("DEBUG sum(values):", sum(values))
+
+        if debug:
+            st.write("DEBUG labels:", labels)
+            st.write("DEBUG values:", values)
+            st.write("DEBUG sum(values):", sum(values))
+
         if sum(values) == 0:
             st.warning("All counts are zero — nothing to plot.")
             st.table(summary_plot)
         else:
             try:
-                fig = go.Figure(go.Pie(labels=labels, values=values, hole=0.0, sort=False,
-                                       marker=dict(colors=px.colors.qualitative.Set2)))
+                fig = go.Figure(
+                    go.Pie(labels=labels, values=values, hole=0.0, sort=False,
+                           marker=dict(colors=px.colors.qualitative.Set2))
+                )
                 fig.update_traces(textposition="inside", textinfo="percent+label")
                 fig.update_layout(title_text="Answerable vs Unanswerable")
                 st.plotly_chart(fig, use_container_width=True)
             except Exception as e:
                 st.error("Failed to render pie chart: " + str(e))
+                # fallback to bar or table
                 try:
                     fig_bar = px.bar(summary_plot, x="label", y="count", title="Answerable vs Unanswerable (bar)")
                     st.plotly_chart(fig_bar, use_container_width=True)
                 except Exception:
                     st.table(summary_plot)
-
 
 st.subheader("Counts by label")
 try:
@@ -231,7 +230,6 @@ if "is_answerable" in data.columns:
             sample_unans = unans.sample(min(10, len(unans)), random_state=42)[["id", "context", "question"]]
             st.table(sample_unans.reset_index(drop=True))
         except Exception:
-            # fallback: show first rows
             st.table(unans.head(10)[["id", "context", "question"]].reset_index(drop=True))
     else:
         st.write("No unanswerable samples found.")
@@ -247,4 +245,5 @@ except Exception:
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("If you enabled Debug mode, the app shows raw dataset diagnostics to help identify mismatches between environments.")
+
 
