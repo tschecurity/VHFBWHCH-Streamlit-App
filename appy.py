@@ -211,3 +211,20 @@ if "is_answerable" in data.columns:
             sample_unans = unans.sample(min(10, len(unans)), random_state=42)[["id", "context", "question"]]
             st.table(sample_unans.reset_index(drop=True))
         except Exception:
+            # fallback: show first rows
+            st.table(unans.head(10)[["id", "context", "question"]].reset_index(drop=True))
+    else:
+        st.write("No unanswerable samples found.")
+else:
+    st.write("No is_answerable column present in data")
+
+st.subheader("Download combined dataset")
+try:
+    csv = data.to_csv(index=False).encode("utf-8")
+    st.download_button(label="Download CSV", data=csv, file_name="squad_v2_combined.csv", mime="text/csv")
+except Exception:
+    st.write("Download not available.")
+
+st.sidebar.markdown("---")
+st.sidebar.markdown("If you enabled Debug mode, the app shows raw dataset diagnostics to help identify mismatches between environments.")
+
