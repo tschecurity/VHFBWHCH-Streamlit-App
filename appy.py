@@ -4,7 +4,7 @@ import pandas as pd
 import plotly.express as px
 from datasets import load_dataset
 
-def load_and_prepare(debug=True):
+def load_and_prepare(debug=False):
     # 1) load dataset
     ds = load_dataset("squad_v2")
 
