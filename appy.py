@@ -180,15 +180,35 @@ else:
             st.table(summary_plot)
         else:
             try:
-                fig_pie = px.pie(
-                    summary_plot,
-                    names="label",
-                    values="count",
-                    title="Answerable vs Unanswerable",
-                    color_discrete_sequence=px.colors.qualitative.Set2
-                )
-                fig_pie.update_traces(textposition="inside", textinfo="percent+label")
-                st.plotly_chart(fig_pie, use_container_width=True)
+                # Robust pie chart (replace existing pie code with this)
+import plotly.graph_objects as go
+
+if summary is None or summary.empty:
+    st.warning("Summary is empty — cannot draw pie chart.")
+else:
+    if not {"label", "count"}.issubset(set(summary.columns)):
+        st.warning("Summary missing required columns 'label' and 'count'. Showing table instead.")
+        st.table(summary)
+    else:
+        summary_plot = summary.copy()
+        summary_plot["count"] = pd.to_numeric(summary_plot["count"], errors="coerce").fillna(0).astype(int)
+        # DEBUG lines — remove after confirming
+        st.write("DEBUG summary_plot:", summary_plot)
+        labels = summary_plot["label"].astype(str).tolist()
+        values = summary_plot["count"].astype(int).tolist()
+        st.write("DEBUG labels:", labels)
+        st.write("DEBUG values:", values)
+        st.write("DEBUG sum(values):", sum(values))
+        if sum(values) == 0:
+            st.warning("All counts are zero — nothing to plot.")
+            st.table(summary_plot)
+        else:
+            try:
+                fig = go.Figure(go.Pie(labels=labels, values=values, hole=0.0, sort=False,
+                                       marker=dict(colors=px.colors.qualitative.Set2)))
+                fig.update_traces(textposition="inside", textinfo="percent+label")
+                fig.update_layout(title_text="Answerable vs Unanswerable")
+                st.plotly_chart(fig, use_container_width=True)
             except Exception as e:
                 st.error("Failed to render pie chart: " + str(e))
                 try:
@@ -196,6 +216,7 @@ else:
                     st.plotly_chart(fig_bar, use_container_width=True)
                 except Exception:
                     st.table(summary_plot)
+
 
 st.subheader("Counts by label")
 try:
