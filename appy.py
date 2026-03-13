@@ -171,7 +171,13 @@ if debug:
 
 st.subheader("Overall proportions")
 
-# Defensive checks and robust plotting
+# --- Dual pie charts: demo 50/50 and real chart (paste in place of existing plotting block) ---
+import plotly.graph_objects as go
+
+# Sidebar toggle to show demo chart
+show_demo = st.sidebar.checkbox("Show forced 50/50 demo pie", value=True)
+
+# Defensive checks
 if summary is None or summary.empty:
     st.warning("Summary is empty — cannot draw pie chart.")
 else:
@@ -179,42 +185,65 @@ else:
         st.warning("Summary missing required columns 'label' and 'count'. Showing table instead.")
         st.table(summary)
     else:
+        # Prepare real summary for plotting
         summary_plot = summary.copy()
         summary_plot["count"] = pd.to_numeric(summary_plot["count"], errors="coerce").fillna(0).astype(int)
         summary_plot = summary_plot[summary_plot["count"] > 0]
 
-        # DEBUG lines — remove after confirming
+        # DEBUG prints for the real chart
         if debug:
-            st.write("DEBUG summary_plot:", summary_plot)
-
-        labels = summary_plot["label"].astype(str).tolist()
-        values = summary_plot["count"].astype(int).tolist()
-
+            st.write("DEBUG summary_plot (real):", summary_plot)
+        real_labels = summary_plot["label"].astype(str).tolist()
+        real_values = summary_plot["count"].astype(int).tolist()
         if debug:
-            st.write("DEBUG labels:", labels)
-            st.write("DEBUG values:", values)
-            st.write("DEBUG sum(values):", sum(values))
+            st.write("DEBUG real_labels:", real_labels)
+            st.write("DEBUG real_values:", real_values)
+            st.write("DEBUG sum(real_values):", sum(real_values))
 
-        if sum(values) == 0:
-            st.warning("All counts are zero — nothing to plot.")
+        # Render demo chart if toggled on
+        if show_demo:
+            st.markdown("**DEBUG demo: forced 50/50 pie chart**")
+            fake_labels = ["answerable", "unanswerable"]
+            fake_values = [1, 1]  # equal weights -> 50/50
+            if debug:
+                st.write("DEBUG fake_labels:", fake_labels)
+                st.write("DEBUG fake_values:", fake_values)
+                st.write("DEBUG sum(fake_values):", sum(fake_values))
+            try:
+                fig_demo = go.Figure(
+                    go.Pie(labels=fake_labels, values=fake_values, sort=False,
+                           marker=dict(colors=px.colors.qualitative.Set2))
+                )
+                fig_demo.update_traces(textposition="inside", textinfo="percent+label")
+                fig_demo.update_layout(title_text="Forced 50/50 Pie Chart Debug Demo")
+                st.plotly_chart(fig_demo, use_container_width=True)
+            except Exception as e:
+                st.error("Demo pie failed: " + str(e))
+                st.table(summary_plot)
+
+        # Render the real chart below the demo (or alone if demo is off)
+        st.markdown("**Real Answerable vs Unanswerable**")
+        if sum(real_values) == 0:
+            st.warning("All counts are zero — nothing to plot for the real chart.")
             st.table(summary_plot)
         else:
             try:
-                fig = go.Figure(
-                    go.Pie(labels=labels, values=values, hole=0.0, sort=False,
+                fig_real = go.Figure(
+                    go.Pie(labels=real_labels, values=real_values, sort=False,
                            marker=dict(colors=px.colors.qualitative.Set2))
                 )
-                fig.update_traces(textposition="inside", textinfo="percent+label")
-                fig.update_layout(title_text="Answerable vs Unanswerable")
-                st.plotly_chart(fig, use_container_width=True)
+                fig_real.update_traces(textposition="inside", textinfo="percent+label")
+                fig_real.update_layout(title_text="Answerable vs Unanswerable (Real Data)")
+                st.plotly_chart(fig_real, use_container_width=True)
             except Exception as e:
-                st.error("Failed to render pie chart: " + str(e))
+                st.error("Real pie failed: " + str(e))
                 # fallback to bar or table
                 try:
                     fig_bar = px.bar(summary_plot, x="label", y="count", title="Answerable vs Unanswerable (bar)")
                     st.plotly_chart(fig_bar, use_container_width=True)
                 except Exception:
                     st.table(summary_plot)
+# --- end dual pie charts block ---
 
 st.subheader("Counts by label")
 try:
