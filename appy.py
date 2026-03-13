@@ -179,7 +179,6 @@ else:
             st.warning("No nonzero counts to plot. Showing table instead.")
             st.table(summary_plot)
         else:
-            try:
                 # Robust pie chart (replace existing pie code with this)
 import plotly.graph_objects as go
 
