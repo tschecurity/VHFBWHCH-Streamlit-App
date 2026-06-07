@@ -151,13 +151,13 @@ summary = pd.DataFrame()
 
 if manual_load:
     if st.sidebar.button("Load dataset now"):
-        ds = safe_load_dataset("squad_v2")
+        ds = safe_load_dataset("rajpurkar/squad_v2")
         data, summary = load_and_prepare_raw(ds, debug=debug)
     else:
         st.sidebar.info("Click 'Load dataset now' to download SQuAD v2.")
 else:
     # automatic load (cached or not)
-    data, summary = cached_load_and_prepare("squad_v2")
+    data, summary = cached_load_and_prepare("rajpurkar/squad_v2")
 
 # -------------------------
 # UI and robust plotting
