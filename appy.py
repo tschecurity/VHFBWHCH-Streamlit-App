@@ -134,11 +134,11 @@ def load_and_prepare_raw(ds, debug=False):
 # -------------------------
 if use_cache:
     @st.cache_data
-    def cached_load_and_prepare(name="squad_v2"):
+    def cached_load_and_prepare(name="rajpurkar/squad_v2"):
         ds = safe_load_dataset(name)
         return load_and_prepare_raw(ds, debug=False)
 else:
-    def cached_load_and_prepare(name="squad_v2"):
+    def cached_load_and_prepare(name="rajpurkar/squad_v2"):
         ds = safe_load_dataset(name)
         return load_and_prepare_raw(ds, debug=False)
 
