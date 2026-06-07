@@ -1,4 +1,4 @@
-def cached_load_and_prepare# app.py
+# app.py
 import json
 import streamlit as st
 import pandas as pd
